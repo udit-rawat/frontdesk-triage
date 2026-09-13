@@ -127,11 +127,16 @@ def rule_triage(text: str) -> Triage:
         priority_reason=reason,
         owner=ROUTING[category],
         confidence=0.35,
-        draft_reply=(
-            "Thank you for getting in touch. We have received your request and logged it with "
-            f"our {ROUTING[category]}. Someone will review the detail and come back to you with "
-            "a clear next step. If anything changes in the meantime, reply here and it will be "
-            "added to the same thread."
-        ),
+        draft_reply="pending",
     )
-    return apply_policy(triage, text)[0]
+    triage = apply_policy(triage, text)[0]
+
+    # Written after the overrides so the desk named in the reply is the desk the
+    # request was actually routed to.
+    triage.draft_reply = (
+        "Thank you for getting in touch. We have received your request and logged it with "
+        f"our {triage.owner} team. Someone will review the detail and come back to you with "
+        "a clear next step. If anything changes in the meantime, reply here and it will be "
+        "added to the same thread."
+    )
+    return triage
