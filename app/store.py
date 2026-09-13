@@ -31,6 +31,9 @@ def _conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # Cheap and idempotent, so a missing or recreated database file cannot turn every
+    # read into a 500.
+    conn.executescript(SCHEMA)
     return conn
 
 
