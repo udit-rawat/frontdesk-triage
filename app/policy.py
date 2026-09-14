@@ -50,8 +50,9 @@ SALES = re.compile(
 )
 TECH = re.compile(r"\b(bug|error|api|integration|dashboard|portal|automat|deploy|feature|dark mode|font)\b", re.I)
 # Timeframes a draft must never commit the company to. The prompt forbids these, but a
-# prompt is a request and not a guarantee, so the output is checked as well. The draft is
-# not rewritten: it is flagged for the person who is already reading it before they send.
+# prompt is a request and not a guarantee, so the output is checked as well. A match sends
+# the reply back to the model to be rewritten without the commitment; if the rewrite still
+# fails, the draft is kept and flagged for the person who is about to send it.
 TIMEFRAME = re.compile(
     r"\b(within (?:the )?(?:next )?(?:hour|day|24 hours|48 hours|\d+ (?:minutes|hours|days))|"
     r"by (?:tomorrow|today|end of (?:day|week)|close of business|eod|cob|monday|tuesday|"
