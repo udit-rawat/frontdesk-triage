@@ -25,7 +25,7 @@ flowchart TB
         PROMPT["app/prompt.py<br/>rubric, routing table, drafting rules"]
         CALL["app/triage.py<br/>strict JSON schema call"]
         VALID["app/schema.py<br/>Pydantic validation"]
-        POLICY["app/policy.py<br/>incident detection, routing, no-deadline rule"]
+        POLICY["app/policy.py<br/>incident detection, routing,<br/>no-deadline rule, timeframe guard"]
         RULES["app/policy.py<br/>keyword rule engine"]
         LAD["app/providers.py<br/>ordered attempt ladder"]
         DB[("app/store.py<br/>SQLite request log")]
@@ -41,6 +41,7 @@ flowchart TB
     GROQ -->|"JSON"| VALID
     GOOG -->|"JSON"| VALID
     VALID -->|"valid"| POLICY
+    POLICY -.->|"draft promises a timeframe"| CALL
     VALID -.->|"invalid, once"| CALL
     CALL -.->|"unreachable"| RULES
     RULES --> DB
@@ -48,9 +49,11 @@ flowchart TB
     DB -->|"triage record"| UI
 ```
 
-One model call per request. The input is a few sentences and the output is seven fields, so a
-chain of agents would add latency and failure modes without adding accuracy. What sits around
-that call is where the reliability comes from.
+One model call per request on the normal path. The input is a few sentences and the output is
+seven fields, so a chain of agents would add latency and failure modes without adding accuracy.
+What sits around that call is where the reliability comes from. There are exactly two cases
+where a second call happens, and both are repairs rather than reasoning: output that fails
+validation, and a draft that commits to a timeframe.
 
 ## How a request is decided
 
@@ -113,9 +116,9 @@ model answered. That is more useful than a spinner that never resolves, and more
 confident answer produced by regular expressions. The fallback fires in practice: it caught a
 transient provider error during an eval run and the request still came back triaged.
 
-Below is request 05 with a deliberately invalid API key, so both models are unreachable. The
-data exposure is still caught, still routed to Engineering, and the interface is explicit about
-why the confidence is low and what the reader should do about it.
+Below is request 05 with every API key deliberately invalidated, so all three model attempts
+fail. The data exposure is still caught, still routed to Engineering, and the interface is
+explicit about why the confidence is low and what the reader should do about it.
 
 ![Request 05 triaged with no model available](docs/fallback.png)
 
@@ -170,10 +173,11 @@ ambiguous request should be hedged, not guessed, and an eval that demands a spec
 an ambiguous question is measuring the wrong thing.
 
 **Both providers pass.** Running the same twelve cases with the Groq key disabled, so every
-request falls through to Gemini, also returns 12/12. Seven of those twelve were answered by the
-keyword engine rather than by Gemini, because Google's free tier rate limits after roughly five
-requests in quick succession, and they passed anyway. That is the degradation path working
-under two simultaneous failures, which is more than it was designed for.
+request falls through to Gemini, also returns 12/12. Six of the twelve were answered by Gemini
+and the other six by the keyword engine, because Google's free tier rate limits after about five
+requests in quick succession. The rule engine's replies passed the drafting assertion too. That
+is the degradation path holding under two simultaneous failures, which is more than it was
+built to survive.
 
 **On reproducibility.** Sampling runs at temperature 0, but the provider is not bit
 deterministic and repeated runs do vary. Over four runs while building this, two cases moved:
@@ -203,7 +207,7 @@ Open http://127.0.0.1:8000. The queue arrives seeded with six requests; click on
 | `GET /api/requests` | The queue, newest last |
 | `PUT /api/requests/{id}/draft` | Save a human edit to a draft reply |
 | `POST /api/reset` | Drop the log and reload the seed set |
-| `GET /api/health` | Liveness plus the active model |
+| `GET /api/health` | Liveness plus the full attempt ladder, in order |
 
 Swap providers by pointing `LLM_BASE_URL` at any OpenAI-compatible endpoint and changing
 `PRIMARY_MODEL`. Nothing else needs to change.
