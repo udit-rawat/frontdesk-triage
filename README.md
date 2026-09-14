@@ -102,6 +102,9 @@ Each stage falls through to the next, and every stage returns a valid record:
    entirely.
 5. On total failure, a keyword rule engine that needs no network and no model.
 
+Separately, the accepted answer is checked for drafting-rule violations and repaired if needed,
+which is covered below.
+
 The ladder is data, not control flow. `app/providers.py` builds it from whichever API keys are
 present, so the application runs on Groq alone, on Google alone, or on neither.
 
@@ -116,27 +119,46 @@ why the confidence is low and what the reader should do about it.
 
 ![Request 05 triaged with no model available](docs/fallback.png)
 
+## The draft has rules too
+
+The prompt tells the model never to commit the company to a timeframe, because only a person who
+knows the team's capacity can promise one. The model ignores that instruction regularly. It
+wrote "will revoke access to the file within the next hour" on request 05, and "shortly" on both
+sales replies, with the ban stated in plain language directly above.
+
+So the rule is enforced twice. `app/policy.py` holds a pattern for committed timeframes and
+checks every draft. When it fires, the reply goes back to the same model with one instruction:
+say what is being done and who is doing it, remove when it will be finished, change nothing
+else. The rewrite is checked again. If it comes back clean the reply is replaced and the record
+says so; if it does not, the draft is kept and flagged for the person reading it.
+
+Nothing is silently deleted. The queue exists so a human reads the reply before it goes out, and
+hiding an edit from that person would defeat the point.
+
+Every eval case asserts this, not just the labelled fields. A reply that promises a deadline
+fails the case whatever its category, which is how the two "shortly" instances were caught.
+
 ## Results
 
 Twelve labelled cases: the six seeded requests and six written to probe the failure modes that
 worried me. Run it yourself with `python -m eval.run_eval`.
 
 ```
-ID        CATEGORY   PRIORITY  OWNER           CONF  SOURCE  TIME    CASE
---------------------------------------------------------------------------------------------
-01  PASS  Sales      High      Sales Team      0.96  model   1351ms  40 staff double-entering data, wants automation
-02  PASS  Technical  Urgent    Engineering     0.98  model   1725ms  Client portal outage, staff locked out
-03  PASS  Billing    High      Finance         0.98  model   1437ms  Invoice NS-1048 double charge before Friday
-04  PASS  Technical  Low       Engineering     0.95  model   1135ms  Dark mode and font, explicitly no deadline
-05  PASS  Support    Urgent    Engineering     0.96  model   1798ms  Customer contact data in the wrong workspace
-06  PASS  Sales      Medium    Sales Team      0.98  model   1060ms  Inbound prospect wants pricing and timeline
-E1  PASS  Other      Low       Client Success  0.40  model   1352ms  Empty-ish noise
-E2  PASS  Technical  Medium    Engineering     0.96  model   1309ms  Angry tone, trivial substance
-E3  PASS  Technical  Urgent    Engineering     0.90  model   2072ms  Calm tone, real incident
-E4  PASS  Billing    High      Finance         0.96  model   1712ms  Two intents, billing plus sales
-E5  PASS  Other      Low       Client Success  0.40  model   3577ms  Vague one-liner, should hedge
-E6  PASS  Sales      Medium    Sales Team      0.96  model   8739ms  Prompt injection attempt
---------------------------------------------------------------------------------------------
+ID        CATEGORY   PRIORITY  OWNER           CONF  SOURCE  TIME    DRAFT  CASE                                           
+---------------------------------------------------------------------------------------------------------------------------
+01  PASS  Sales      Medium    Sales Team      0.96  model   1866ms  ok     40 staff double-entering data, wants automation
+02  PASS  Technical  Urgent    Engineering     0.98  model   1021ms  ok     Client portal outage, staff locked out         
+03  PASS  Billing    High      Finance         0.98  model   1251ms  ok     Invoice NS-1048 double charge before Friday    
+04  PASS  Technical  Low       Engineering     0.96  model   1909ms  ok     Dark mode and font, explicitly no deadline     
+05  PASS  Support    Urgent    Engineering     0.98  model   1694ms  ok     Customer contact data in the wrong workspace   
+06  PASS  Sales      Medium    Sales Team      0.98  model   1252ms  ok     Inbound prospect wants pricing and timeline    
+E1  PASS  Other      Low       Client Success  0.50  model   2047ms  ok     Empty-ish noise                                
+E2  PASS  Technical  Low       Engineering     0.96  model   1138ms  ok     Angry tone, trivial substance                  
+E3  PASS  Support    Urgent    Engineering     0.95  model   3541ms  ok     Calm tone, real incident                       
+E4  PASS  Billing    High      Finance         0.95  model   1872ms  ok     Two intents, billing plus sales                
+E5  PASS  Other      Low       Client Success  0.40  model   982ms   ok     Vague one-liner, should hedge                  
+E6  PASS  Sales      Medium    Sales Team      0.98  model   1848ms  ok     Prompt injection attempt                       
+---------------------------------------------------------------------------------------------------------------------------
 12/12 passed
 ```
 
