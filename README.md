@@ -2,6 +2,9 @@
 
 Turns an unstructured client request into a triaged, routed, drafted next step.
 
+**Live: https://frontdesk-triage.onrender.com** (free instance, so the first request after a
+quiet spell takes about ten seconds to wake it up).
+
 Paste an email, form submission or chat message. FrontDesk returns a one sentence summary,
 a category, a priority with its reason, the desk that owns it, and a reply a team member can
 read and send. Every decision is shown with its confidence and its provenance, because the
@@ -24,14 +27,19 @@ flowchart TB
         VALID["app/schema.py<br/>Pydantic validation"]
         POLICY["app/policy.py<br/>incident detection, routing, no-deadline rule"]
         RULES["app/policy.py<br/>keyword rule engine"]
+        LAD["app/providers.py<br/>ordered attempt ladder"]
         DB[("app/store.py<br/>SQLite request log")]
     end
 
-    LLM["Groq<br/>openai/gpt-oss-120b"]
+    GROQ["Groq<br/>gpt-oss-120b, then gpt-oss-20b"]
+    GOOG["Google AI Studio<br/>gemini-3.5-flash"]
 
     UI -->|"request text"| API
-    API --> PROMPT --> CALL --> LLM
-    LLM -->|"JSON"| VALID
+    API --> PROMPT --> CALL --> LAD
+    LAD --> GROQ
+    LAD -.->|"Groq down"| GOOG
+    GROQ -->|"JSON"| VALID
+    GOOG -->|"JSON"| VALID
     VALID -->|"valid"| POLICY
     VALID -.->|"invalid, once"| CALL
     CALL -.->|"unreachable"| RULES
@@ -86,10 +94,16 @@ stated non-deadline describes the sender's expectation, not the consequence.
 
 Each stage falls through to the next, and every stage returns a valid record:
 
-1. Strict JSON schema call to `openai/gpt-oss-120b`.
+1. Strict JSON schema call to `openai/gpt-oss-120b` on Groq.
 2. On a validation failure, one repair pass that shows the model its own output and the error.
-3. On a provider failure, the same call against `openai/gpt-oss-20b`.
-4. On total failure, a keyword rule engine that needs no network and no model.
+3. On a provider failure, the same call against `openai/gpt-oss-20b`, still on Groq.
+4. Then `gemini-3.5-flash` on Google AI Studio. A second model at the same vendor does not help
+   when the vendor is the thing that is down, so the last model attempt is somewhere else
+   entirely.
+5. On total failure, a keyword rule engine that needs no network and no model.
+
+The ladder is data, not control flow. `app/providers.py` builds it from whichever API keys are
+present, so the application runs on Groq alone, on Google alone, or on neither.
 
 The rule engine returns confidence 0.35 and the interface says plainly that a machine without a
 model answered. That is more useful than a spinner that never resolves, and more honest than a
@@ -133,6 +147,12 @@ all, so the case asserts that confidence lands below 0.6 rather than asserting a
 ambiguous request should be hedged, not guessed, and an eval that demands a specific answer to
 an ambiguous question is measuring the wrong thing.
 
+**Both providers pass.** Running the same twelve cases with the Groq key disabled, so every
+request falls through to Gemini, also returns 12/12. Seven of those twelve were answered by the
+keyword engine rather than by Gemini, because Google's free tier rate limits after roughly five
+requests in quick succession, and they passed anyway. That is the degradation path working
+under two simultaneous failures, which is more than it was designed for.
+
 **On reproducibility.** Sampling runs at temperature 0, but the provider is not bit
 deterministic and repeated runs do vary. Over four runs while building this, two cases moved:
 E5 alternated between Other and Sales, and E2 between Technical and Support. Both are genuinely
@@ -166,6 +186,9 @@ Open http://127.0.0.1:8000. The queue arrives seeded with six requests; click on
 Swap providers by pointing `LLM_BASE_URL` at any OpenAI-compatible endpoint and changing
 `PRIMARY_MODEL`. Nothing else needs to change.
 
+`GEMINI_API_KEY` is optional. Set it and Google AI Studio joins the end of the attempt ladder;
+leave it blank and the ladder runs Groq then the rule engine.
+
 ## Decisions and tradeoffs
 
 **One call, not an agent.** Seven fields from a few sentences does not need decomposition,
@@ -194,8 +217,10 @@ nothing to break at deploy time.
 - Drafts are deliberately non-committal because the model has no facts to promise with. A real
   version would ground them in the account record.
 - English only, single tenant, no authentication, no rate limiting. SQLite is a file on disk.
-- The Groq free tier throttles, and its available models change. Two are configured, and the
-  rule engine sits under both.
+- Free tiers throttle. Groq's available models also change without notice; the model this was
+  built against a few months ago no longer exists. Google's free tier rate limits after about
+  five requests in a burst, so it is a backstop for an outage rather than capacity. The rule
+  engine sits under all of it.
 
 ## Next
 
