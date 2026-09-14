@@ -49,6 +49,17 @@ SALES = re.compile(
     re.I,
 )
 TECH = re.compile(r"\b(bug|error|api|integration|dashboard|portal|automat|deploy|feature|dark mode|font)\b", re.I)
+# Timeframes a draft must never commit the company to. The prompt forbids these, but a
+# prompt is a request and not a guarantee, so the output is checked as well. The draft is
+# not rewritten: it is flagged for the person who is already reading it before they send.
+TIMEFRAME = re.compile(
+    r"\b(within (?:the )?(?:next )?(?:hour|day|24 hours|48 hours|\d+ (?:minutes|hours|days))|"
+    r"by (?:tomorrow|today|end of (?:day|week)|close of business|eod|cob|monday|tuesday|"
+    r"wednesday|thursday|friday)|"
+    r"in the next \d+|in \d+ (?:minutes|hours|days)|"
+    r"shortly|first thing|later today|this afternoon|by then|within the day)\b",
+    re.I,
+)
 NOW = re.compile(r"\b(immediate|immediately|urgent|asap|as soon as possible|right now|today|this morning)\b", re.I)
 
 
@@ -89,6 +100,13 @@ def apply_policy(triage: Triage, text: str) -> tuple[Triage, list[str]]:
     if triage.owner != expected:
         notes.append(f"Policy: routing corrected from {triage.owner} to {expected}.")
         triage.owner = expected
+
+    promise = TIMEFRAME.search(triage.draft_reply)
+    if promise:
+        notes.append(
+            f'Draft commits to a timeframe ("{promise.group(0)}"). Confirm the team can meet it '
+            "before sending, or remove it."
+        )
 
     if incident and triage.category == "Other":
         notes.append("Policy: incident re-categorised from Other to Support.")

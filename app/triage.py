@@ -10,8 +10,8 @@ import time
 from openai import OpenAI
 from pydantic import ValidationError
 
-from app.policy import apply_policy, rule_triage
-from app.prompt import REPAIR_PROMPT, SYSTEM_PROMPT
+from app.policy import TIMEFRAME, apply_policy, rule_triage
+from app.prompt import DERISK_PROMPT, REPAIR_PROMPT, SYSTEM_PROMPT
 from app.providers import Attempt, ladder
 from app.schema import TRIAGE_JSON_SCHEMA, Triage
 
@@ -71,6 +71,30 @@ def _attempt(attempt: Attempt, text: str) -> tuple[Triage | None, str | None]:
             return None, f"{type(second_error).__name__}: {str(second_error)[:160]}"
 
 
+def _rewrite_draft(attempt: Attempt, result: Triage, phrase: str) -> bool:
+    """Strip a timeframe commitment from a draft. True if the rewrite came back clean.
+
+    The models keep reaching for "shortly" and "within the hour" however firmly the prompt
+    forbids it, so the output is checked and repaired rather than trusted.
+    """
+    try:
+        completion = client(attempt).chat.completions.create(
+            model=attempt.model,
+            messages=[{"role": "user",
+                       "content": DERISK_PROMPT.format(phrase=phrase, draft=result.draft_reply)}],
+            temperature=0,
+            max_tokens=MAX_TOKENS,
+            **attempt.options,
+        )
+    except Exception:
+        return False
+    rewritten = (completion.choices[0].message.content or "").strip().strip('"')
+    if not rewritten or TIMEFRAME.search(rewritten):
+        return False
+    result.draft_reply = rewritten
+    return True
+
+
 def triage(text: str) -> dict:
     """Triage one request. Never raises."""
     started = time.time()
@@ -109,9 +133,18 @@ def triage(text: str) -> dict:
 
     result, policy_notes = apply_policy(result, text)
     notes += policy_notes
+    adjusted = bool(policy_notes)
+
+    promise = TIMEFRAME.search(result.draft_reply)
+    if promise:
+        adjusted = True
+        if _rewrite_draft(answered_by, result, promise.group(0)):
+            notes = [n for n in notes if not n.startswith("Draft commits to a timeframe")]
+            notes.append(f'Rewrote a timeframe commitment ("{promise.group(0)}") out of the draft.')
+
     return {
         "triage": result,
-        "source": "model+policy" if policy_notes else "model",
+        "source": "model+policy" if adjusted else "model",
         "notes": notes,
         "model": answered_by.model,
         "latency_ms": int((time.time() - started) * 1000),

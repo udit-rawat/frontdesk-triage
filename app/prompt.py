@@ -44,7 +44,10 @@ send. Rules:
 - State the immediate next step and who is taking it.
 - For Urgent items, lead with the containing action.
 - Never invent facts, names, dates, refunds, prices, or commitments the company has not made.
-- Never promise a delivery date. "Today" and "within the hour" are also dates.
+- Never commit to a timeframe. Banned: "within the hour", "by tomorrow", "today", "shortly",
+  "in 24 hours", "first thing", "by end of day", and every variation of them. Say what is being
+  done and who is doing it, never when it will be finished. Only a person who knows the team's
+  actual capacity can promise a time.
 - No placeholders like [Name] or [Date]. Write it so it can be sent unedited.
 - Plain professional English. No exclamation marks, no marketing language."""
 
@@ -52,3 +55,12 @@ send. Rules:
 REPAIR_PROMPT = """Your previous output did not satisfy the schema. Error: {error}
 
 Return the corrected JSON object only. No explanation."""
+
+
+DERISK_PROMPT = """This drafted reply commits to a timeframe, which is not allowed: "{phrase}"
+
+Rewrite it so it says what is being done and who is doing it, with no statement about when it \
+will be finished. Change nothing else. Return only the rewritten reply as plain text, with no \
+quotes and no explanation.
+
+{draft}"""
