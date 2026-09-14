@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from app import store  # noqa: E402
-from app.triage import PRIMARY_MODEL, triage  # noqa: E402
+from app.providers import ladder  # noqa: E402
+from app.triage import triage  # noqa: E402
 
 STATIC = pathlib.Path(__file__).resolve().parent.parent / "static"
 
@@ -34,7 +35,12 @@ class DraftIn(BaseModel):
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "model": PRIMARY_MODEL}
+    attempts = ladder()
+    return {
+        "ok": True,
+        "model": attempts[0].model if attempts else None,
+        "ladder": [f"{a.label}/{a.model}" for a in attempts],
+    }
 
 
 @app.get("/api/requests")
